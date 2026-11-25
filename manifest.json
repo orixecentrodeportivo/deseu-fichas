@@ -1,0 +1,16 @@
+{
+  "name": "De Seu · Fichas",
+  "short_name": "De Seu",
+  "description": "Fichas de clientas, cuestionario, consentimientos y fotos de antes y después. Los datos se quedan en la tablet.",
+  "lang": "es",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#FFFBFA",
+  "theme_color": "#1E2B45",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
