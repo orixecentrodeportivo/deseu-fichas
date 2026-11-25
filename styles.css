@@ -128,7 +128,7 @@ textarea { min-height: 80px; resize: vertical; }
 .pin span { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--marino); }
 .pin span.lleno { background: var(--marino); }
 .teclado { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
-.teclado button { min-height: 68px; border-radius: 14px; border: 1px solid var(--linea); background: #fff; font-size: 1.5rem; font-weight: 600; }
+.teclado button { touch-action: manipulation; user-select: none; min-height: 68px; border-radius: 14px; border: 1px solid var(--linea); background: #fff; font-size: 1.5rem; font-weight: 600; }
 .error { color: var(--profundo); min-height: 1.4em; font-weight: 600; }
 
 #aviso { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(150%); background: var(--marino); color: #fff;

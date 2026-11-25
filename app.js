@@ -77,15 +77,23 @@ async function pantallaBloqueo(error = '') {
       <p style="color:var(--suave);font-size:.85rem;margin-top:18px">Los datos se guardan solo en esta tablet.</p>
     </div></div>`);
   }
+  // Al teclear solo se actualizan los puntos y el mensaje (redibujar toda la pantalla en cada número iba lento).
+  function puntos(msg = '') {
+    document.querySelectorAll('.bloqueo .pin span').forEach((s, i) => s.classList.toggle('lleno', i < pin.length));
+    const er = document.querySelector('.bloqueo .error'); if (er) er.textContent = msg;
+  }
   await prepararModo(); dibujar();
-  $app.onclick = async e => {
+  $app.onclick = null;
+  $app.onpointerdown = async e => {
+    if (!document.querySelector('.bloqueo')) { $app.onpointerdown = null; return; }
     const c = e.target.closest('[data-c]'), n = e.target.closest('[data-n]');
     if (c) { elegido = c.dataset.c; error = ''; if (await prepararModo()) dibujar(''); return; }
     if (!n || DB.centro !== elegido) return;
+    e.preventDefault();
     const v = n.dataset.n;
-    if (v === 'borrar') { pin = pin.slice(0, -1); dibujar(''); return; }
-    if (v !== 'ok') { if (pin.length < 6) pin += v; dibujar(''); if (pin.length < 6) return; }
-    if (pin.length < 4) { dibujar('Mínimo 4 números'); return; }
+    if (v === 'borrar') { pin = pin.slice(0, -1); puntos(); return; }
+    if (v !== 'ok') { if (pin.length < 6) pin += v; puntos(); if (pin.length < 6) return; }
+    if (pin.length < 4) { puntos('Mínimo 4 números'); return; }
     if (modo === 'crear') {
       if (!primero) { primero = pin; pin = ''; dibujar(''); return; }
       if (primero !== pin) { primero = null; pin = ''; dibujar('No coinciden. Empieza otra vez'); return; }
