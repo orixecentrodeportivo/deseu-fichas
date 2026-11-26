@@ -8,7 +8,8 @@ const CIRC = ['preso', 'madero', 'masaje', 'rf_corporal'], OJOS = ['pestanas', '
 const TODOS = '*';
 
 window.DATOS = {
-  version: '0.7.4',
+  version: '0.7.5',
+  profesionalPorDefecto: 'Andrea',             // sale ya escrito en la revisión del cuestionario (se puede cambiar)
   centros: {
     deseu: {
       nombre: 'De Seu', sub: 'by Orixe Benestar', direccion: 'Rúa do Grove 2 · Coia · Vigo', whatsapp: '34746075962',

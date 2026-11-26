@@ -383,7 +383,7 @@ function vistaSalud(c) {
       ${rv ? `<p>✓ Revisado por <b>${esc(c.revision.por)}</b> el ${fecha(c.revision.fecha)}${c.revision.fototipoObs ? ` · fototipo observado ${c.revision.fototipoObs}` : ''}.</p>
         <button class="btn sec" data-a="quitar-revision">Volver a revisar</button>`
       : `<p>Repasa con la clienta cada respuesta que no sea «No», completa el detalle si falta${laser ? ' y confirma el fototipo mirando la piel y el vello' : ''}. Sin esta revisión no se puede guardar ninguna sesión.</p>
-        <div class="rejilla"><label class="campo"><span>Profesional</span><input type="text" id="revpor" value="${esc(S.profesional || '')}" placeholder="Tu nombre"></label>
+        <div class="rejilla"><label class="campo"><span>Profesional</span><input type="text" id="revpor" value="${esc(S.profesional || D.profesionalPorDefecto || '')}" placeholder="Tu nombre"></label>
         ${laser ? `<div class="campo"><span class="lbl">Fototipo observado${fAuto ? ` (el test da ${fAuto.tipo})` : ''}</span>${chips('data-ftobs', ['I', 'II', 'III', 'IV', 'V', 'VI'], c.revision?.fototipoObs || S.ftobs || '')}</div>` : ''}</div>
         <button class="btn coral" data-a="revisar">Marcar como revisado</button>`}
     </div></section>
@@ -434,7 +434,8 @@ function vistaFirma(c, st) {
     ${edad(c.nacimiento) != null && edad(c.nacimiento) < 18 ? '<div class="nota">Es menor de edad: firma la madre, el padre o el tutor legal.</div>' : ''}
     <h3 style="margin-top:20px">Firma</h3>
     ${st.firmada ? `<p>Firmada el ${fecha(c.firma.fecha)}${c.firma.porClienta ? ' por la clienta en la tablet' : ''}.</p><img src="${c.firma.img}" alt="Firma" style="max-width:360px;border:1px solid var(--linea);border-radius:10px;background:#fff">
-      <div class="fila no-imprimir" style="margin-top:14px"><button class="btn sec" data-a="refirmar">Volver a firmar</button><span class="espacio"></span><button class="btn sec" data-a="imprimir">Guardar en PDF / imprimir</button></div>`
+      <div class="fila no-imprimir" style="margin-top:14px"><button class="btn sec" data-a="refirmar">Volver a firmar</button><span class="espacio"></span><button class="btn sec" data-a="imprimir">Imprimir</button><button class="btn coral" data-a="pdf-consent">Guardar PDF y pasar a fotos</button></div>
+      <p style="color:var(--suave);font-size:.85rem">Se abre el menú de compartir: elige <b>Drive</b> y la carpeta del centro (o «Guardar» para dejarlo en la tablet).</p>`
     : `<canvas class="firma" id="firma"></canvas>
       <div class="fila no-imprimir" style="margin-top:12px"><button class="btn sec" data-a="limpiar-firma">Borrar firma</button><span class="espacio"></span>
       <button class="btn coral" data-a="firmar" ${listo ? '' : 'disabled'}>Firmar y guardar</button></div>
@@ -527,6 +528,17 @@ async function manejarFicha(e) {
   }
   if (a === 'refirmar') { c.firma = null; await guardarClienta(true); pantallaFicha(); }
   if (a === 'imprimir') window.print();
+  if (a === 'pdf-consent') {
+    t.disabled = true; t.textContent = 'Creando PDF…';
+    try {
+      const blob = await pdfConsentimiento(c);
+      const nombre = `consentimiento-${normal(c.nombre + ' ' + c.apellidos).replace(/\W+/g, '-')}-${hoy()}.pdf`;
+      const ok = await compartirODescargar([new File([blob], nombre, { type: 'application/pdf' })], `Consentimiento de ${c.nombre} ${c.apellidos}`);
+      if (ok === false) { t.disabled = false; t.textContent = 'Guardar PDF y pasar a fotos'; return; }
+      c.consentPdf = new Date().toISOString(); await guardarClienta(true);
+      S.pestana = 'fotos'; return pantallaFicha();
+    } catch (err) { avisar('No se pudo crear el PDF'); t.disabled = false; t.textContent = 'Guardar PDF y pasar a fotos'; return; }
+  }
   if (a === 'borrar') {
     const n = prompt(`Para borrar la ficha, sus sesiones y TODAS sus fotos, escribe el nombre: ${c.nombre}`);
     if (n === null) return;
@@ -889,13 +901,69 @@ function avisoCara() { if (S.clienta.consent.redes === 'Sí, sin que se me vea l
 async function compartirODescargar(files, titulo, titulo2) {
   if (!Array.isArray(files)) { files = [new File([files], titulo, { type: files.type || 'application/octet-stream' })]; titulo = titulo2; }
   if (navigator.canShare && navigator.canShare({ files })) {
-    try { await navigator.share({ files, title: titulo }); return; } catch (e) { if (e.name === 'AbortError') return; }
+    try { await navigator.share({ files, title: titulo }); return true; } catch (e) { if (e.name === 'AbortError') return false; }
   }
   for (const f of files) {
     const a = document.createElement('a'); a.href = URL.createObjectURL(f); a.download = f.name; a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 4000); if (files.length > 1) await new Promise(r => setTimeout(r, 250));
   }
-  avisar(files.length > 1 ? `${files.length} imágenes guardadas en Descargas` : 'Guardado en Descargas');
+  avisar(files.length > 1 ? `${files.length} archivos guardados en Descargas` : 'Guardado en Descargas');
+  return true;
+}
+
+// ---------- PDF del consentimiento (se crea en la tablet; luego se comparte a Drive o se guarda) ----------
+async function cargarJsPDF() {
+  if (!window.jspdf) await new Promise((ok, mal) => { const s = document.createElement('script'); s.src = 'vendor/jspdf.umd.min.js'; s.onload = ok; s.onerror = mal; document.head.appendChild(s); });
+  return window.jspdf.jsPDF;
+}
+const aDataURL = blob => new Promise(r => { const f = new FileReader(); f.onload = () => r(f.result); f.readAsDataURL(blob); });
+async function imagenPDF(src) {
+  const d = src.startsWith('data:') ? src : await aDataURL(await (await fetch(src)).blob());
+  const im = new Image(); im.src = d; await im.decode(); return { d, w: im.width, h: im.height };
+}
+async function pdfConsentimiento(c) {
+  const jsPDF = await cargarJsPDF(), doc = new jsPDF({ unit: 'mm', format: 'a4' });
+  const M = 18, W = 210 - 2 * M, ALTO = 297; let y = M;
+  const salto = h => { if (y + h > ALTO - M) { doc.addPage(); y = M; } };
+  const txt = (t, o = {}) => {
+    const size = o.size || 10; doc.setFont('helvetica', o.bold ? 'bold' : 'normal'); doc.setFontSize(size); doc.setTextColor(...(o.color || [30, 43, 69]));
+    const lh = size * 0.43;
+    for (const l of doc.splitTextToSize(String(t), W - (o.sangria || 0))) { salto(lh); doc.text(l, M + (o.sangria || 0), y + lh * 0.8); y += lh; }
+    y += o.gap ?? 1.5;
+  };
+  const raya = () => { salto(4); doc.setDrawColor(249, 126, 127); doc.setLineWidth(0.8); doc.line(M, y, M + W, y); y += 5; };
+  try { const L = await imagenPDF('icons/logo.png'); doc.addImage(L.d, 'PNG', M, y, 42, 42 * L.h / L.w); y += 42 * L.h / L.w + 4; } catch (e) {}
+  txt('Ficha y consentimiento informado', { size: 16, bold: true, gap: 2 }); raya();
+  const C = centro(), e = edad(c.nacimiento), si = r => r === 'si' ? 'Sí' : r === 'no' ? 'No' : (r || '—');
+  txt(`${c.nombre} ${c.apellidos}`, { size: 12, bold: true, gap: 1 });
+  txt(`WhatsApp: ${c.telefono || '—'} · Correo: ${c.email || '—'} · Nacimiento: ${c.nacimiento || '—'}${e != null ? ` (${e} años)` : ''}`);
+  txt(`Servicios: ${serviciosElegidos(c).map(nomServ).join(', ')}`, { gap: 4 });
+  txt('Cuestionario de salud', { size: 12, bold: true, gap: 1 });
+  for (const q of preguntasVisibles(c)) {
+    if (q.titulo) { txt(q.titulo, { bold: true, size: 10, gap: 0.5, color: [178, 58, 72] }); continue; }
+    const r = c.salud[q.id] || {};
+    txt(`${q.p} — ${si(r.r)}${r.d ? ` (${r.d})` : ''}`, { sangria: 3, gap: 0.8 });
+  }
+  const ft = fototipo(c); if (ft || c.revision?.fototipoObs) txt(`Fototipo: ${ft ? `${ft.tipo} según el test (${ft.pts} puntos)` : ''}${c.revision?.fototipoObs ? ` · observado por la profesional: ${c.revision.fototipoObs}` : ''}`, { gap: 2 });
+  if (c.revision?.por) txt(`Revisado por ${c.revision.por} el ${fecha(c.revision.fecha)}.`, { gap: 3 });
+  y += 2; txt('Consentimientos', { size: 12, bold: true, gap: 1 });
+  const K = D.consentimientos, limpio = s => s.replace(/\s*\[NOTA:[^\]]*\]/g, '');
+  for (const k of ['datos', 'veracidad', ...gruposConsent(c), 'comunicaciones', 'fotos']) {
+    txt(`${c.consent[k] ? '[X] Acepta' : '[ ] No acepta'} · ${K[k].titulo}`, { bold: true, gap: 0.5 });
+    txt(limpio(K[k].texto), { size: 8.5, sangria: 3, gap: 2, color: [70, 80, 100] });
+  }
+  txt(`${K.redes.titulo}: ${c.consent.redes}`, { bold: true, gap: 4 });
+  if (e != null && e < 18) txt('Menor de edad: firma la madre, el padre o el tutor legal.', { bold: true, gap: 2 });
+  if (c.firma?.img) {
+    const F = await imagenPDF(c.firma.img), fw = 70, fh = Math.min(35, fw * F.h / F.w);
+    salto(fh + 14); txt('Firma', { bold: true, gap: 1 });
+    doc.addImage(F.d, 'PNG', M, y, fw, fh); y += fh + 2;
+    txt(`Firmado el ${new Date(c.firma.fecha).toLocaleString('es-ES')}${c.firma.porClienta ? ' por la clienta en la tablet' : ''}.`, { size: 9 });
+  }
+  const n = doc.getNumberOfPages();
+  for (let i = 1; i <= n; i++) { doc.setPage(i); doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(90, 102, 128);
+    doc.text(`${C.nombre} ${C.sub} · ${C.direccion} · Documento con datos de salud: confidencial · Página ${i} de ${n}`, M, ALTO - 8); }
+  return doc.output('blob');
 }
 
 // ---------- cámara guiada ----------

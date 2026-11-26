@@ -1,10 +1,10 @@
 // Service worker: la app funciona sin conexión. Solo guarda los archivos de la app, nunca datos de clientas.
 // Con internet, siempre pide la versión nueva (así las mejoras llegan solas); sin internet, usa la guardada.
-const VERSION = 'deseu-v0.7.4';
+const VERSION = 'deseu-v0.7.5';
 const ARCHIVOS = [
   './', 'index.html', 'styles.css', 'datos.js', 'db.js', 'app.js', 'manifest.json',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/logo.png', 'icons/logo-negativo.png', 'icons/corazon.png',
-  'fonts/DMSans.woff2', 'fonts/DMSerif-normal.woff2', 'fonts/DMSerif-italic.woff2'
+  'fonts/DMSans.woff2', 'fonts/DMSerif-normal.woff2', 'fonts/DMSerif-italic.woff2', 'vendor/jspdf.umd.min.js'
 ];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(VERSION).then(c => c.addAll(ARCHIVOS)).then(() => self.skipWaiting()));
