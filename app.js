@@ -134,7 +134,15 @@ function reiniciarBloqueo() {
   if (S.centro && !document.querySelector('.bloqueo')) temporizador = setTimeout(() => { cerrarCamara(); pantallaBloqueo('Bloqueada por inactividad'); }, BLOQUEO_MIN * 60000);
 }
 ['pointerdown', 'keydown'].forEach(ev => document.addEventListener(ev, reiniciarBloqueo, { passive: true }));
-document.addEventListener('visibilitychange', () => { if (document.hidden && S.centro) { cerrarCamara(); pantallaBloqueo(); } });
+// Salir un momento (elegir un archivo, WhatsApp, compartir, cámara del sistema) NO bloquea.
+// Solo se pide el PIN al abrir la app de cero, con el botón «Bloquear» o tras 5 minutos sin usarla (también si se estuvo fuera más de 5 minutos).
+let ocultaDesde = 0;
+document.addEventListener('visibilitychange', () => {
+  if (!S.centro) return;
+  if (document.hidden) { ocultaDesde = Date.now(); return; }
+  if (ocultaDesde && Date.now() - ocultaDesde > BLOQUEO_MIN * 60000 && !document.querySelector('.bloqueo')) { cerrarCamara(); pantallaBloqueo('Bloqueada por inactividad'); }
+  ocultaDesde = 0;
+});
 
 // ---------- triaje: de las respuestas a «apta / precaución / esperar / no tratar» ----------
 function serviciosElegidos(c) { return (c.servicios && c.servicios.length) ? c.servicios : ['valoracion']; }
