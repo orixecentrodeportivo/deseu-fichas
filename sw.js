@@ -1,6 +1,6 @@
 // Service worker: la app funciona sin conexión. Solo guarda los archivos de la app, nunca datos de clientas.
-// Al publicar una versión nueva, cambia VERSION para que la tablet descargue los archivos nuevos.
-const VERSION = 'deseu-v0.7.2';
+// Con internet, siempre pide la versión nueva (así las mejoras llegan solas); sin internet, usa la guardada.
+const VERSION = 'deseu-v0.7.3';
 const ARCHIVOS = [
   './', 'index.html', 'styles.css', 'datos.js', 'db.js', 'app.js', 'manifest.json',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/logo.png', 'icons/logo-negativo.png', 'icons/corazon.png',
@@ -14,6 +14,10 @@ self.addEventListener('activate', e => {
     .then(() => self.clients.claim()));
 });
 self.addEventListener('fetch', e => {
-  if (e.request.method !== 'GET') return;
-  e.respondWith(caches.match(e.request).then(r => r || fetch(e.request)));
+  const r = e.request;
+  if (r.method !== 'GET' || new URL(r.url).origin !== location.origin) return;
+  e.respondWith(fetch(r).then(res => {
+    if (res.ok) { const copia = res.clone(); caches.open(VERSION).then(c => c.put(r, copia)); }
+    return res;
+  }).catch(() => caches.match(r, { ignoreSearch: true })));
 });

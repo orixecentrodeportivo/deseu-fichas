@@ -334,3 +334,6 @@ div[style*="text-align:center"] .franjas { margin-left: auto; margin-right: auto
 .camara .flash { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); background: rgba(30,43,69,.85); color: #fff; padding: 14px 24px; border-radius: 14px; font: 700 1.2rem 'DM Sans', sans-serif; opacity: 0; transition: opacity .2s; pointer-events: none; }
 .camara .flash.ver { opacity: 1; }
 @media (max-width: 760px) { .tira-vistas, .serie-fotos { gap: 4px; } .rejilla-montaje { grid-template-columns: 56px repeat(5, 1fr); gap: 4px; } .camara .pasos-cam span { display: none; } }
+/* v0.7.3 · respuesta inmediata al tocar el teclado del PIN */
+.teclado button:active { background: var(--niebla); transform: scale(.96); }
+.teclado button { transition: none; -webkit-user-select: none; }

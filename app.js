@@ -48,7 +48,22 @@ const chips = (attr, opciones, valor) => `<div class="opciones">${opciones.map(o
   `<button type="button" ${attr}="${esc(o)}" class="${valor === o ? 'on' : ''}">${esc(o)}</button>`).join('')}</div>`;
 
 // ---------- bloqueo por centro y PIN ----------
+// Al bloquearse con una ficha a medias se guarda todo (en memoria y en la base de la tablet) para seguir tras el PIN.
+function guardarParaSeguir() {
+  if (!S.centro || !S.clienta || document.querySelector('.bloqueo')) return;
+  S.reanudar = JSON.parse(JSON.stringify({ clienta: S.clienta, pantalla: S.pantalla, pestana: S.pestana, paso: S.pasoClienta, sesion: S.sesion, presu: S.presu }));
+  DB.fijar('borrador', S.reanudar).catch(() => {});
+}
+async function seguirDondeIba(r) {
+  S.clienta = r.clienta; S.pestana = r.pestana || 'datos'; S.sesion = r.sesion || null; S.presu = r.presu || null;
+  S.seleccion = []; S.montajes = {}; S.comparando = null;
+  avisar('Seguimos donde lo dejaste');
+  if (r.pantalla === 'clienta') return modoClienta(r.paso || 0);
+  if (r.pantalla === 'pre') return pantallaPreClienta();
+  return pantallaFicha();
+}
 async function pantallaBloqueo(error = '') {
+  guardarParaSeguir();
   S.clienta = null; S.modoClienta = false; S.presu = null;
   let elegido = S.centro || localStorage.getItem('ultimoCentro') || 'deseu';
   if (!D.centros[elegido]) elegido = Object.keys(D.centros)[0];
@@ -107,7 +122,12 @@ async function pantallaBloqueo(error = '') {
     }
   };
 }
-async function entrar(c) { S.centro = c; localStorage.setItem('ultimoCentro', c); await cargarTarifas(); pantallaInicio(); }
+async function entrar(c) {
+  S.centro = c; localStorage.setItem('ultimoCentro', c); await cargarTarifas();
+  const r = S.reanudar || await DB.ajuste('borrador'); S.reanudar = null;
+  if (r && r.clienta) { await DB.fijar('borrador', null); return seguirDondeIba(r); }
+  pantallaInicio();
+}
 let temporizador;
 function reiniciarBloqueo() {
   clearTimeout(temporizador);
@@ -180,7 +200,7 @@ function panelTriaje(c, compacto) {
 
 // ---------- inicio: lista de clientas ----------
 async function pantallaInicio(filtro = '') {
-  S.clienta = null; S.seleccion = []; S.sesion = null; S.comparando = null; S.presu = null; S.modoClienta = false; S.promo = S.promoVer = null;
+  S.clienta = null; S.seleccion = []; S.sesion = null; S.comparando = null; S.presu = null; S.modoClienta = false; S.promo = S.promoVer = null; S.pantalla = 'inicio';
   reintentarEnvios().then(n => { if (n) avisar(`${n} presupuesto(s) pendiente(s) enviado(s)`); });
   const nRec = await contarRecordatoriosHoy();
   const todas = (await DB.todas('clientas')).sort((a, b) => (b.actualizada || '').localeCompare(a.actualizada || ''));
@@ -270,6 +290,7 @@ async function guardarClienta(silencioso) {
   return true;
 }
 async function pantallaFicha() {
+  S.pantalla = 'ficha';
   const c = S.clienta, st = estadoFicha(c), t = triaje(c), p = peor(t);
   const titulo = c.nombre ? esc(`${c.nombre} ${c.apellidos}`) : 'Nueva clienta';
   const marca = { verde: '', aviso: ' ●', ambar: ' ●', rojo: ' ●' };
@@ -1025,6 +1046,12 @@ async function pantallaCopias() {
       <label class="campo"><span>Clave secreta</span><input type="password" id="ct" value="${esc(ct)}"></label></div>
       <label class="check"><input type="checkbox" id="ea" ${ea ? 'checked' : ''}> Enviar solo al guardar un presupuesto nuevo</label>
       <button class="btn" data-a="guardar-correo">Guardar</button></section>
+    <section class="tarjeta"><h2>Importar clientas de Bookitit</h2>
+      <p>Elige el archivo exportado de Bookitit (Clientes → Exportar, formato CSV). Se lee aquí, en la tablet: no se envía a ningún sitio.</p>
+      <p style="color:var(--suave);font-size:.9rem">Se importan nombre, apellidos, móvil y correo. <b>No</b> se importan el DNI (no hace falta) ni las respuestas de salud (cada clienta rellena el cuestionario y firma en su primera visita). Los duplicados se juntan y no se repite a nadie que ya esté en la app.</p>
+      <label class="campo"><span>Archivo .csv</span><input type="file" id="csvbk" accept=".csv,text/csv,text/plain"></label>
+      <button class="btn" data-a="leer-csv">Revisar el archivo</button>
+      <div id="resimport"></div></section>
     <section class="tarjeta"><h2>Hacer copia</h2>
       <p>Crea un archivo <b>cifrado</b> con todas las fichas, sesiones y fotos de ${esc(centro().nombre)}. Sin la contraseña no se puede abrir. Guárdalo en el Drive del centro.</p>
       <p style="color:var(--suave)">Última copia: ${ultima ? fecha(ultima) : 'ninguna'}. Recomendado: una vez por semana.</p>
@@ -1048,6 +1075,23 @@ async function pantallaCopias() {
     if (a === 'guardar-correo') {
       await DB.fijar('correoScript', document.getElementById('cs').value.trim()); await DB.fijar('correoToken', document.getElementById('ct').value);
       await DB.fijar('envioAuto', document.getElementById('ea').checked); return avisar('Envío de correo guardado');
+    }
+    if (a === 'leer-csv') {
+      const f = document.getElementById('csvbk').files[0]; if (!f) return avisar('Elige el archivo');
+      S.importacion = await prepararImportacion(f);
+      const R = S.importacion;
+      document.getElementById('resimport').innerHTML = R.error ? `<div class="nota">${esc(R.error)}</div>` : `<div class="nota" style="margin-top:14px">
+        <b>${R.nuevas.length}</b> clientas nuevas para importar.<br>
+        ${R.juntadas} filas repetidas juntadas · ${R.yaEstaban} ya estaban en la app · ${R.descartadas} filas vacías o de prueba descartadas.<br>
+        ${R.sinContacto} de las nuevas no tienen ni móvil ni correo válido: entran igual, pero habrá que completarlas cuando vengan.</div>
+        <button class="btn coral" data-a="confirmar-import" ${R.nuevas.length ? '' : 'disabled'}>Importar ${R.nuevas.length} clientas</button>`;
+      return;
+    }
+    if (a === 'confirmar-import') {
+      const R = S.importacion; if (!R?.nuevas?.length) return;
+      t.disabled = true; t.textContent = 'Importando…';
+      for (const c of R.nuevas) await DB.guardar('clientas', c);
+      S.importacion = null; avisar(`${R.nuevas.length} clientas importadas`); return pantallaInicio();
     }
     if (a === 'compartir-mejoras') {
       const txt = `Mejoras de la app De Seu (${hoy()})\n\n` + mejoras.map(m => `· ${m.fecha.slice(0, 10)} [${m.pantalla}] ${m.texto}`).join('\n');
@@ -1094,6 +1138,82 @@ async function pantallaCopias() {
   };
 }
 
+// ---------- Importar clientas de Bookitit (CSV con «;») ----------
+// Solo nombre, apellidos, móvil y correo. Sin DNI ni datos de salud (mínimo de datos; la salud se pregunta y se firma en la app).
+function leerCSV(txt, sep = ';') {
+  const filas = []; let fila = [], campo = '', comillas = false;
+  for (let i = 0; i < txt.length; i++) {
+    const ch = txt[i];
+    if (comillas) { if (ch === '"') { if (txt[i + 1] === '"') { campo += '"'; i++; } else comillas = false; } else campo += ch; continue; }
+    if (ch === '"') comillas = true;
+    else if (ch === sep) { fila.push(campo); campo = ''; }
+    else if (ch === '\n' || ch === '\r') { if (ch === '\r' && txt[i + 1] === '\n') i++; fila.push(campo); filas.push(fila); fila = []; campo = ''; }
+    else campo += ch;
+  }
+  if (campo || fila.length) { fila.push(campo); filas.push(fila); }
+  return filas.filter(f => f.some(x => x.trim()));
+}
+const palabras = s => normal(s).replace(/[^a-zñ ]/g, ' ').split(/\s+/).filter(Boolean);
+const mismaPersona = (a, b) => { const x = palabras(a), y = palabras(b); if (!x.length || !y.length) return false;
+  const [c, l] = x.length <= y.length ? [x, y] : [y, x]; return c.every(w => l.includes(w)); };
+function partirNombre(t) {
+  let s = t.replace(/[,;]+\s*$/, '').replace(/\s+/g, ' ').trim();
+  if (s === s.toUpperCase() || s === s.toLowerCase()) s = s.toLowerCase().replace(/(^|[\s-])\p{L}/gu, m => m.toUpperCase());
+  const w = s.split(' ');
+  if (w.length <= 1) return { nombre: s, apellidos: '' };
+  if (w.length === 2) return { nombre: w[0], apellidos: w[1] };
+  return { nombre: w.slice(0, -2).join(' '), apellidos: w.slice(-2).join(' ') };
+}
+function limpiarTel(t) {
+  let d = (t || '').replace(/\D/g, '');
+  if (d.length === 11 && d.startsWith('34')) d = d.slice(2);
+  if (d.length === 9 && /^[6-9]/.test(d)) return d;
+  return d.length >= 11 && d.length <= 13 ? d : '';
+}
+async function prepararImportacion(file) {
+  const buf = await file.arrayBuffer();
+  let txt = new TextDecoder('utf-8').decode(buf);
+  if (txt.includes('�')) txt = new TextDecoder('windows-1252').decode(buf);
+  txt = txt.replace(/^﻿/, '');
+  const filas = leerCSV(txt); if (filas.length < 2) return { error: 'El archivo está vacío o no es un CSV.' };
+  const cab = filas[0].map(h => normal(h.trim()));
+  const col = n => cab.findIndex(h => h === n);
+  const iNom = col('nombre y apellidos'), iTel = col('movil'), iMail = col('email'), iDir = col('direccion');
+  if (iNom < 0 || (iTel < 0 && iMail < 0)) return { error: 'No encuentro las columnas «Nombre y Apellidos», «Móvil» o «Email». ¿Es el CSV de clientes de Bookitit?' };
+  const grupos = []; let descartadas = 0, juntadas = 0;
+  for (const f of filas.slice(1)) {
+    const nombre = (f[iNom] || '').trim();
+    let email = (f[iMail] || '').trim().toLowerCase();
+    if (!correoValido(email)) email = correoValido(f[iDir] || '') ? f[iDir].trim().toLowerCase() : '';
+    const tel = limpiarTel(f[iTel]);
+    if (!nombre || /prueba|borrar|^test$/i.test(nombre) || (palabras(nombre).length < 2 && !tel && !email)) { descartadas++; continue; }
+    const g = grupos.find(x => mismaPersona(x.nombre, nombre) &&
+      ((tel && x.tels.includes(tel)) || (email && x.emails.includes(email)) || normal(x.nombre) === normal(nombre) || (!tel && !email) || (!x.tels.length && !x.emails.length)));
+    if (g) {
+      juntadas++;
+      if (palabras(nombre).length > palabras(g.nombre).length) g.nombre = nombre;
+      if (tel && !g.tels.includes(tel)) g.tels.push(tel);
+      if (email && !g.emails.includes(email)) g.emails.push(email);
+    } else grupos.push({ nombre, tels: tel ? [tel] : [], emails: email ? [email] : [] });
+  }
+  const existentes = await DB.todas('clientas');
+  let yaEstaban = 0, sinContacto = 0; const nuevas = [], ahora = new Date().toISOString();
+  for (const g of grupos) {
+    const esta = existentes.some(c => mismaPersona(`${c.nombre} ${c.apellidos}`, g.nombre) &&
+      (g.tels.includes(limpiarTel(c.telefono)) || g.emails.includes((c.email || '').toLowerCase()) || normal(`${c.nombre} ${c.apellidos}`) === normal(g.nombre)));
+    if (esta) { yaEstaban++; continue; }
+    const c = nuevaClienta(), n = partirNombre(g.nombre);
+    Object.assign(c, n, { telefono: g.tels[0] || '', email: g.emails[0] || '', origen: '', creada: ahora, actualizada: ahora,
+      notas: g.tels.length > 1 || g.emails.length > 1 ? `Importada de Bookitit con varios contactos: ${[...g.tels.slice(1), ...g.emails.slice(1)].join(', ')}` : '',
+      importada: { de: 'Bookitit', fecha: ahora } });
+    delete c.nueva; delete c.valoracion;
+    c.busqueda = normal(`${c.nombre} ${c.apellidos} ${c.telefono} ${c.email}`);
+    if (!c.telefono && !c.email) sinContacto++;
+    nuevas.push(c);
+  }
+  return { nuevas, juntadas, yaEstaban, descartadas, sinContacto };
+}
+
 // ===================== v0.3 · modo clienta, presupuestos, recordatorios y tarifa =====================
 const euros = n => (Math.round((+n || 0) * 100) / 100).toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
 const correoValido = e => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test((e || '').trim());
@@ -1111,6 +1231,7 @@ const tarifa = id => (S.tarifas || D.tarifas).find(t => t.id === id);
 
 // ---------- Antes de dar la tablet: la profesional marca para qué viene ----------
 function pantallaPreClienta() {
+  S.pantalla = 'pre';
   const c = S.clienta;
   pintar(`${barra('Antes de dar la tablet', 'inicio')}<main>
     <section class="tarjeta"><h2>¿Para qué <em class="cur">viene</em>?</h2>
@@ -1141,7 +1262,7 @@ function preguntasDeSeccion(c, idx) {
   return { titulo: vis[idx].titulo, preguntas: out };
 }
 async function modoClienta(paso = 0) {
-  const c = S.clienta; S.modoClienta = true;
+  const c = S.clienta; S.modoClienta = true; S.pantalla = 'clienta';
   const pasos = pasosClienta(c), id = pasos[Math.min(paso, pasos.length - 1)];
   S.pasoClienta = paso;
   const ok = (msg) => `<p class="error" id="errcli">${esc(msg || '')}</p>`;
