@@ -337,3 +337,9 @@ div[style*="text-align:center"] .franjas { margin-left: auto; margin-right: auto
 /* v0.7.3 · respuesta inmediata al tocar el teclado del PIN */
 .teclado button:active { background: var(--niebla); transform: scale(.96); }
 .teclado button { transition: none; -webkit-user-select: none; }
+/* v0.7.6 · elegir vistas para guardar */
+.rejilla-montaje .cab.elegir { border: 2px solid var(--linea); background: #fff; border-radius: 10px; padding: 4px 2px 6px; min-height: 44px; }
+.rejilla-montaje .cab.elegir .marca { display: block; margin-top: 2px; font-size: .72rem; font-weight: 700; color: var(--suave); }
+.rejilla-montaje .cab.elegir.on { border-color: var(--coral); background: #FFF4F2; }
+.rejilla-montaje .cab.elegir.on .marca { color: var(--profundo); }
+.rejilla-montaje .cab.elegir:disabled { opacity: .4; }

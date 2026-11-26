@@ -478,6 +478,10 @@ async function manejarFicha(e) {
   if (t.dataset.completar) return continuarSerie(t.dataset.completar);
   if (t.dataset.rehacer) return continuarSerie(t.dataset.rehacer, +t.dataset.vista);
   if (t.dataset.vcomp) return compararVista(t.dataset.vcomp, +t.dataset.vista);
+  if (t.dataset.elegir) {
+    S.selVistas ||= {}; const l = (S.selVistas[t.dataset.elegir] ||= []), i = +t.dataset.vista, k = l.indexOf(i);
+    k >= 0 ? l.splice(k, 1) : l.push(i); l.sort(); const y = scrollY; await pantallaFicha(); return scrollTo(0, y);
+  }
   if (t.dataset.borrarserie) {
     const fs = (await DB.fotosDe(c.id)).filter(f => f.serie === t.dataset.borrarserie);
     if (!confirm(`¿Borrar esta serie (${fs.length} fotos)? No se puede deshacer.`)) return;
@@ -532,7 +536,7 @@ async function manejarFicha(e) {
     t.disabled = true; t.textContent = 'Creando PDF…';
     try {
       const blob = await pdfConsentimiento(c);
-      const nombre = `consentimiento-${normal(c.nombre + ' ' + c.apellidos).replace(/\W+/g, '-')}-${hoy()}.pdf`;
+      const nombre = `${nombreArchivo(c)}.pdf`;   // «Nombre PrimerApellido.pdf»
       const ok = await compartirODescargar([new File([blob], nombre, { type: 'application/pdf' })], `Consentimiento de ${c.nombre} ${c.apellidos}`);
       if (ok === false) { t.disabled = false; t.textContent = 'Guardar PDF y pasar a fotos'; return; }
       c.consentPdf = new Date().toISOString(); await guardarClienta(true);
@@ -551,8 +555,9 @@ async function manejarFicha(e) {
   if (a === 'nueva-foto') return abrirCamara(document.getElementById('zona').value, document.getElementById('servicio').value);
   if (a === 'comparar') return comparar();
   if (a === 'empezar-serie') return empezarSerie();
-  if (a === 'exportar-montaje') return exportarMontaje(t.dataset.marea, false);
-  if (a === 'exportar-vistas') return exportarMontaje(t.dataset.marea, true);
+  if (a === 'exportar-montaje') return exportarMontaje(t.dataset.marea, 'montaje');
+  if (a === 'exportar-sel') return exportarMontaje(t.dataset.marea, 'sel');
+  if (a === 'exportar-todo') return exportarMontaje(t.dataset.marea, 'todo');
   if (a === 'exportar') return exportarComparacion();
   if (a === 'borrar-fotos') {
     if (!confirm(`¿Borrar ${S.seleccion.length} foto(s)? No se puede deshacer.`)) return;
@@ -743,16 +748,18 @@ async function vistaFotos(c) {
           <label class="mini">Antes <select data-msel="antes" data-marea="${esc(a)}">${opt(par.de, par.antes.id)}</select></label>
           <label class="mini">Después <select data-msel="despues" data-marea="${esc(a)}">${opt(par.de, par.despues.id)}</select></label></div>
         <div class="rejilla-montaje">
-          <span></span>${vs.map(v => `<span class="cab">${picto(v.ang, 34)}${esc(v.corto)}</span>`).join('')}
+          <span></span>${vs.map((v, i) => { const ok = par.antes.fotos[i] && par.despues.fotos[i], on = (S.selVistas?.[a] || []).includes(i);
+            return `<button type="button" class="cab elegir ${on ? 'on' : ''}" data-elegir="${esc(a)}" data-vista="${i}" ${ok ? '' : 'disabled'}>${picto(v.ang, 34)}${esc(v.corto)}<span class="marca">${on ? '✓ Elegida' : 'Elegir'}</span></button>`; }).join('')}
           <span class="fila-rot antes">ANTES<br><small>${fecha(par.antes.fecha)}</small></span>
           ${vs.map((v, i) => celda(par.antes.fotos[i], a, i)).join('')}
           <span class="fila-rot despues">DESPUÉS<br><small>${fecha(par.despues.fecha)}</small></span>
           ${vs.map((v, i) => celda(par.despues.fotos[i], a, i)).join('')}
         </div>
-        <p class="nota-foto">Toca una columna para compararla con el deslizador.</p>
+        <p class="nota-foto">Toca una foto para compararla con el deslizador. Toca «Elegir» arriba para escoger las vistas que quieres guardar.</p>
         <div class="fila fin"><span style="color:var(--suave);font-size:.9rem">Redes: ${esc(c.consent.redes)}</span><span class="espacio"></span>
-          <button class="btn sec" data-a="exportar-vistas" data-marea="${esc(a)}">Guardar las 5 por separado</button>
-          <button class="btn" data-a="exportar-montaje" data-marea="${esc(a)}">Guardar montaje</button></div></div>`;
+          <button class="btn sec" data-a="exportar-montaje" data-marea="${esc(a)}">Solo el montaje</button>
+          ${(S.selVistas?.[a] || []).length ? `<button class="btn" data-a="exportar-sel" data-marea="${esc(a)}">Guardar las ${S.selVistas[a].length} elegidas</button>` : ''}
+          <button class="btn coral" data-a="exportar-todo" data-marea="${esc(a)}">Guardar todo de una vez</button></div></div>`;
     } else {
       html += `<p class="nota-foto">Cuando haya una serie de <b>después</b>, aquí aparecerá el montaje antes/después hecho automáticamente.</p>`;
     }
@@ -874,26 +881,27 @@ async function imagenMontaje(area, par) {
 }
 async function exportarComparacion() {
   const [a, b] = S.comparando, { blob, interno } = await imagenComparacion(a, b);
-  const nombre = `antes-despues-${normal(etiquetaFoto(a)).replace(/\W+/g, '-')}-${hoy()}${interno ? '-USO-INTERNO' : ''}.jpg`;
+  const nombre = `${nombreArchivo(S.clienta, ...etiquetaFoto(a).split(' · '), b.fecha.slice(0, 10), interno ? 'USO INTERNO' : '')}.jpg`;
   await compartirODescargar([new File([blob], nombre, { type: blob.type })], interno ? 'Comparativa (uso interno: sin permiso para redes)' : 'Comparativa antes y después');
   avisoCara();
 }
-async function exportarMontaje(area, separadas) {
+// modo: 'montaje' (la imagen con las 10 fotos) · 'sel' (las vistas elegidas) · 'todo' (montaje + todas las vistas). Todo sale de una vez.
+async function exportarMontaje(area, modo) {
   const par = parMontaje(area, seriesDe(await DB.fotosDe(S.clienta.id))); if (!par) return;
-  const base = `antes-despues-${normal(area).replace(/\W+/g, '-')}-${hoy()}`, files = [];
-  let interno = false;
-  if (separadas) {
-    const vs = vistasDe(area);
-    for (let i = 0; i < vs.length; i++) if (par.antes.fotos[i] && par.despues.fotos[i]) {
-      const r = await imagenComparacion(par.antes.fotos[i], par.despues.fotos[i]); interno = r.interno;
-      files.push(new File([r.blob], `${base}-${i + 1}-${vs[i].id}${interno ? '-USO-INTERNO' : ''}.jpg`, { type: 'image/jpeg' }));
+  const vs = vistasDe(area), files = [], usados = new Set();
+  const archivo = (blob, ...partes) => { let n = nombreArchivo(S.clienta, area, par.despues.fecha.slice(0, 10), ...partes), k = 2, f = n; while (usados.has(f)) f = `${n} (${k++})`; usados.add(f); files.push(new File([blob], f + '.jpg', { type: 'image/jpeg' })); };
+  const interno = S.clienta.consent.redes === 'No', etq = interno ? 'USO INTERNO' : '';
+  avisar('Preparando las imágenes…');
+  if (modo !== 'sel') { const r = await imagenMontaje(area, par); archivo(r.blob, 'montaje', etq); }
+  if (modo !== 'montaje') {
+    const lista = modo === 'sel' ? (S.selVistas?.[area] || []) : vs.map((_, i) => i);
+    for (const i of lista) if (par.antes.fotos[i] && par.despues.fotos[i]) {
+      const r = await imagenComparacion(par.antes.fotos[i], par.despues.fotos[i]); archivo(r.blob, `${i + 1} ${vs[i].n}`, etq);
     }
-  } else {
-    const r = await imagenMontaje(area, par); interno = r.interno;
-    files.push(new File([r.blob], `${base}-montaje${interno ? '-USO-INTERNO' : ''}.jpg`, { type: 'image/jpeg' }));
   }
   if (!files.length) return avisar('No hay ninguna vista con antes y después');
-  await compartirODescargar(files, interno ? 'Antes y después (uso interno)' : 'Antes y después');
+  const ok = await compartirODescargar(files, interno ? 'Antes y después (uso interno)' : 'Antes y después');
+  if (ok && modo === 'sel') { S.selVistas[area] = []; const y = scrollY; await pantallaFicha(); scrollTo(0, y); }
   avisoCara();
 }
 function avisoCara() { if (S.clienta.consent.redes === 'Sí, sin que se me vea la cara') avisar('Ojo: permiso sin cara. Comprueba que no se ve antes de publicar'); }
@@ -910,6 +918,10 @@ async function compartirODescargar(files, titulo, titulo2) {
   avisar(files.length > 1 ? `${files.length} archivos guardados en Descargas` : 'Guardado en Descargas');
   return true;
 }
+
+// Nombres de archivo: «Nombre PrimerApellido …», sin tildes (con tildes Android puede perder el nombre al guardar).
+const sinTildes = t => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z0-9 .'()-]/g, '').replace(/\s+/g, ' ').trim();
+const nombreArchivo = (c, ...resto) => [sinTildes([c.nombre, (c.apellidos || '').trim().split(/\s+/)[0]].filter(Boolean).join(' ')), ...resto.filter(Boolean).map(sinTildes)].join(' - ').replace(/\.+$/, '');
 
 // ---------- PDF del consentimiento (se crea en la tablet; luego se comparte a Drive o se guarda) ----------
 async function cargarJsPDF() {

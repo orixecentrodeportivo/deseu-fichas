@@ -1,6 +1,6 @@
 // Service worker: la app funciona sin conexión. Solo guarda los archivos de la app, nunca datos de clientas.
 // Con internet, siempre pide la versión nueva (así las mejoras llegan solas); sin internet, usa la guardada.
-const VERSION = 'deseu-v0.7.5';
+const VERSION = 'deseu-v0.7.6';
 const ARCHIVOS = [
   './', 'index.html', 'styles.css', 'datos.js', 'db.js', 'app.js', 'manifest.json',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/logo.png', 'icons/logo-negativo.png', 'icons/corazon.png',
