@@ -906,10 +906,10 @@ async function exportarMontaje(area, modo) {
 }
 function avisoCara() { if (S.clienta.consent.redes === 'Sí, sin que se me vea la cara') avisar('Ojo: permiso sin cara. Comprueba que no se ve antes de publicar'); }
 // Acepta (lista de File, título) o, como antes, (blob, nombre, título).
-async function compartirODescargar(files, titulo, titulo2) {
+async function compartirODescargar(files, titulo, titulo2, texto) {
   if (!Array.isArray(files)) { files = [new File([files], titulo, { type: files.type || 'application/octet-stream' })]; titulo = titulo2; }
   if (navigator.canShare && navigator.canShare({ files })) {
-    try { await navigator.share({ files, title: titulo }); return true; } catch (e) { if (e.name === 'AbortError') return false; }
+    try { await navigator.share(texto ? { files, title: titulo, text: texto } : { files, title: titulo }); return true; } catch (e) { if (e.name === 'AbortError') return false; }
   }
   for (const f of files) {
     const a = document.createElement('a'); a.href = URL.createObjectURL(f); a.download = f.name; a.click();
@@ -922,6 +922,51 @@ async function compartirODescargar(files, titulo, titulo2) {
 // Nombres de archivo: «Nombre PrimerApellido …», sin tildes (con tildes Android puede perder el nombre al guardar).
 const sinTildes = t => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z0-9 .'()-]/g, '').replace(/\s+/g, ' ').trim();
 const nombreArchivo = (c, ...resto) => [sinTildes([c.nombre, (c.apellidos || '').trim().split(/\s+/)[0]].filter(Boolean).join(' ')), ...resto.filter(Boolean).map(sinTildes)].join(' - ').replace(/\.+$/, '');
+
+// ---------- PDF del presupuesto (con logo; se adjunta al correo y se comparte por WhatsApp) ----------
+function mensajeCortoPresupuesto(c, p) {
+  return `Hola, ${c.nombre} 👋 Te enviamos tu presupuesto de De Seu (nº ${p.numero}) en PDF. Total: ${euros(calcPresu(p).total)}, IVA incluido. Cualquier duda, nos dices.`;
+}
+async function archivoPresupuesto(c, p) {
+  const blob = await pdfPresupuesto(c, p);
+  return new File([blob], `${nombreArchivo(c, 'Presupuesto ' + p.numero)}.pdf`, { type: 'application/pdf' });
+}
+async function pdfPresupuesto(c, p) {
+  const jsPDF = await cargarJsPDF(), doc = new jsPDF({ unit: 'mm', format: 'a4' }), k = calcPresu(p), C = centro();
+  const M = 20, W = 210 - 2 * M, ALTO = 297, MARINO = [30, 43, 69], SUAVE = [90, 102, 128], PROFUNDO = [178, 58, 72];
+  let y = 18;
+  const f = (size, bold, color = MARINO) => { doc.setFont('helvetica', bold ? 'bold' : 'normal'); doc.setFontSize(size); doc.setTextColor(...color); };
+  try { const L = await imagenPDF('icons/logo.png'); const lw = 50, lh = lw * L.h / L.w; doc.addImage(L.d, 'PNG', M, y, lw, lh); y += lh + 3; } catch (e) { y += 10; }
+  doc.setDrawColor(249, 126, 127); doc.setLineWidth(1.2); doc.line(M, y, M + W, y); doc.setDrawColor(196, 214, 232); doc.line(M, y + 1.6, M + W, y + 1.6); y += 10;
+  f(20, true); doc.text('Presupuesto', M, y); f(10, false, SUAVE); doc.text(`Nº ${p.numero}`, M + W, y, { align: 'right' }); y += 7;
+  f(10, false, SUAVE); doc.text(`Fecha: ${fecha(p.fecha)} · Válido hasta: ${fecha(masDias(p.fecha, D.validezPresupuesto))}`, M, y); y += 9;
+  f(11, true); doc.text(`Para: ${c.nombre} ${c.apellidos}`, M, y); y += 10;
+  // tabla
+  const colU = M + W - 52, colI = M + W;
+  doc.setFillColor(251, 239, 237); doc.rect(M, y - 5, W, 8, 'F'); f(9, true, SUAVE);
+  doc.text('CONCEPTO', M + 2, y); doc.text('UDS.', colU, y, { align: 'right' }); doc.text('IMPORTE', colI - 2, y, { align: 'right' }); y += 8;
+  for (const l of p.lineas) {
+    const imp = (+l.precio || 0) * (+l.cant || 1) * (1 - (+l.dto || 0) / 100);
+    const lineas = doc.splitTextToSize(l.concepto + (+l.dto ? `  (-${l.dto} %)` : ''), colU - M - 20);
+    if (y + lineas.length * 5 > ALTO - 50) { doc.addPage(); y = 25; }
+    f(10.5, false); doc.text(lineas, M + 2, y); doc.text(String(+l.cant || 1), colU, y, { align: 'right' }); doc.text(euros(imp), colI - 2, y, { align: 'right' });
+    y += lineas.length * 5 + 2; doc.setDrawColor(228, 232, 239); doc.setLineWidth(0.2); doc.line(M, y - 3, M + W, y - 3);
+  }
+  y += 2;
+  const fila = (t, v, o = {}) => { f(o.size || 10.5, o.bold, o.color || MARINO); doc.text(t, colU - 25, y, { align: 'right' }); doc.text(v, colI - 2, y, { align: 'right' }); y += o.size ? 8 : 6; };
+  if (k.dtoLineas || k.dtoGlobal) fila('Suma', euros(k.bruto));
+  if (k.dtoLineas) fila('Descuentos por línea', '- ' + euros(k.dtoLineas), { color: PROFUNDO });
+  if (k.dtoGlobal) fila(`Descuento${p.dto.tipo === '%' ? ' ' + p.dto.valor + ' %' : ''}`, '- ' + euros(k.dtoGlobal), { color: PROFUNDO });
+  doc.setDrawColor(...MARINO); doc.setLineWidth(0.5); doc.line(colU - 60, y - 2, M + W, y - 2); y += 4;
+  fila('TOTAL (IVA incluido)', euros(k.total), { size: 13, bold: true });
+  if (p.lineas.some(l => l.motivoDto)) { f(9.5, false, PROFUNDO); doc.text(`${D.cosmeticaBono.motivo}: -${D.cosmeticaBono.pct} % en cosmética Amai Hana.`, M, y); y += 7; }
+  if (p.notas) { y += 3; f(10.5, false); const n = doc.splitTextToSize(p.notas, W - 8); doc.setFillColor(255, 251, 250); doc.rect(M, y - 5, W, n.length * 5 + 5, 'F'); doc.text(n, M + 4, y); y += n.length * 5 + 6; }
+  y += 6; f(12, false, PROFUNDO); doc.text('Valoramos. Planificamos. Y lo compruebas tú.', M, y);
+  f(8.5, false, SUAVE);
+  doc.text(`${C.nombre} ${C.sub} · ${C.direccion}${C.whatsapp ? ` · WhatsApp +${C.whatsapp.slice(0, 2)} ${C.whatsapp.slice(2)}` : ''}`, M, ALTO - 14);
+  doc.text(`Precios con IVA incluido. Presupuesto válido ${D.validezPresupuesto} días desde su fecha.`, M, ALTO - 10);
+  return doc.output('blob');
+}
 
 // ---------- PDF del consentimiento (se crea en la tablet; luego se comparte a Drive o se guarda) ----------
 async function cargarJsPDF() {
@@ -1578,8 +1623,8 @@ function vistaPresupuesto(c, p) {
       <button class="btn sec" data-a="estado-presu" data-estado="aceptado">Aceptado</button>
       <button class="btn sec" data-a="estado-presu" data-estado="rechazado">Rechazado</button>
       <span class="espacio"></span>
-      <button class="btn sec" data-a="imprimir-presu">PDF / imprimir</button>
-      <button class="btn sec" data-a="whatsapp-presu">WhatsApp</button>
+      <button class="btn sec" data-a="imprimir-presu">Guardar PDF</button>
+      <button class="btn sec" data-a="whatsapp-presu">WhatsApp (PDF)</button>
       <button class="btn" data-a="guardar-presu">Guardar</button>
       <button class="btn coral" data-a="enviar-presu" ${c.sinCorreo || !correoValido(c.email) ? 'disabled' : ''}>${p.envios.length ? 'Guardar y reenviar' : 'Guardar y enviar por correo'}</button></div>
   </section>`;
@@ -1617,14 +1662,16 @@ function textoPresupuesto(c, p) {
 async function enviarCorreoPresupuesto(c, p) {
   const url = await DB.ajuste('correoScript'), token = await DB.ajuste('correoToken');
   const asunto = `Tu presupuesto de De Seu · nº ${p.numero}`;
-  if (!url) {           // Sin el envío automático configurado: abre el correo con todo escrito.
-    location.href = `mailto:${encodeURIComponent(c.email)}?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(textoPresupuesto(c, p))}`;
+  if (!url) {           // Sin el envío automático: se abre el menú de compartir con el PDF (elegir Gmail; el destinatario se escribe a mano).
+    const ok = await compartirODescargar([await archivoPresupuesto(c, p)], asunto, null, `Para: ${c.email}\n\n` + mensajeCortoPresupuesto(c, p));
+    if (ok === false) return 'cancelado';
     p.envios.push({ fecha: new Date().toISOString(), via: 'correo (manual)' }); p.estado = 'enviado';
     return 'manual';
   }
   try {
     const logo = b64(await (await fetch('icons/logo.png')).arrayBuffer());   // el logo va incrustado en el correo (manual: nunca escrito a mano)
-    const r = await fetch(url, { method: 'POST', body: JSON.stringify({ token, para: c.email, asunto, html: htmlPresupuesto(c, p, 'cid:logo'), logo, archivo: `Presupuesto De Seu ${p.numero}.pdf` }) });
+    const pdf = await archivoPresupuesto(c, p);
+    const r = await fetch(url, { method: 'POST', body: JSON.stringify({ token, para: c.email, asunto, html: htmlPresupuesto(c, p, 'cid:logo'), logo, pdf: b64(await pdf.arrayBuffer()), archivo: pdf.name }) });
     const j = await r.json();
     if (!j.ok) throw new Error(j.error || 'error');
     p.envios.push({ fecha: new Date().toISOString(), via: 'correo' }); p.estado = 'enviado'; delete p.pendienteEnvio;
@@ -1657,15 +1704,16 @@ async function accionPresupuesto(a, t) {
   }
   if (a === 'add-libre') { p.lineas.push({ concepto: 'Concepto', cant: 1, precio: '', dto: 0 }); return pantallaFicha(); }
   if (a === 'estado-presu') { p.estado = t.dataset.estado; await guardarPresu(p); avisar(p.estado === 'aceptado' ? 'Presupuesto aceptado' : 'Presupuesto rechazado'); return pantallaFicha(); }
-  if (a === 'imprimir-presu') {
-    const f = document.createElement('iframe'); f.style.cssText = 'position:fixed;width:0;height:0;border:0'; f.srcdoc = htmlPresupuesto(c, p);
-    document.body.appendChild(f); f.onload = () => { f.contentWindow.print(); setTimeout(() => f.remove(), 2000); }; return;
-  }
-  if (a === 'whatsapp-presu') {
-    let tel = (c.telefono || '').replace(/\D/g, ''); if (tel.length === 9) tel = '34' + tel;
-    if (!tel) return avisar('No hay teléfono');
-    p.envios.push({ fecha: new Date().toISOString(), via: 'WhatsApp' }); if (p.estado === 'borrador') p.estado = 'enviado';
-    await guardarPresu(p); window.open(`https://wa.me/${tel}?text=${encodeURIComponent(textoPresupuesto(c, p))}`, '_blank'); return pantallaFicha();
+  if (a === 'imprimir-presu' || a === 'whatsapp-presu') {
+    if (p.lineas.some(l => l.precio === null || l.precio === '' || isNaN(+l.precio))) return avisar('Hay líneas sin precio');
+    if (a === 'whatsapp-presu' && !(c.telefono || '').replace(/\D/g, '')) return avisar('No hay teléfono');
+    t.disabled = true; const txt0 = t.textContent; t.textContent = 'Creando PDF…';
+    let ok = false;
+    try { ok = await compartirODescargar([await archivoPresupuesto(c, p)], `Presupuesto de De Seu nº ${p.numero}`, null, a === 'whatsapp-presu' ? mensajeCortoPresupuesto(c, p) : ''); }
+    catch (err) { avisar('No se pudo crear el PDF'); }
+    t.disabled = false; t.textContent = txt0;
+    if (ok && a === 'whatsapp-presu') { p.envios.push({ fecha: new Date().toISOString(), via: 'WhatsApp (PDF)' }); if (p.estado === 'borrador') p.estado = 'enviado'; await guardarPresu(p); return pantallaFicha(); }
+    return;
   }
   if (a === 'guardar-presu' || a === 'enviar-presu') {
     if (p.lineas.some(l => l.precio === null || l.precio === '' || isNaN(+l.precio))) return avisar('Hay líneas sin precio');
@@ -1676,7 +1724,8 @@ async function accionPresupuesto(a, t) {
     if (a === 'enviar-presu' || auto) {
       const r = await enviarCorreoPresupuesto(c, p);
       await guardarPresu(p);
-      avisar(r === 'ok' ? `Presupuesto enviado a ${c.email}` : r === 'pendiente' ? 'Sin conexión: se enviará solo cuando vuelva internet' : 'Se ha abierto el correo con el presupuesto: pulsa «Enviar»');
+      if (r === 'cancelado') return avisar('No se ha enviado');
+      avisar(r === 'ok' ? `Presupuesto enviado a ${c.email} con el PDF` : r === 'pendiente' ? 'Sin conexión: se enviará solo cuando vuelva internet' : 'Presupuesto compartido en PDF');
     } else { await guardarPresu(p); avisar('Presupuesto guardado'); }
     S.presu = null; return pantallaFicha();
   }

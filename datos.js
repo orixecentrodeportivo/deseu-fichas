@@ -8,7 +8,7 @@ const CIRC = ['preso', 'madero', 'masaje', 'rf_corporal'], OJOS = ['pestanas', '
 const TODOS = '*';
 
 window.DATOS = {
-  version: '0.7.6',
+  version: '0.7.7',
   profesionalPorDefecto: 'Andrea',             // sale ya escrito en la revisión del cuestionario (se puede cambiar)
   centros: {
     deseu: {
